@@ -1,0 +1,119 @@
+version: "2"
+
+linters:
+  default: none
+  exclusions:
+    rules:
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+          - bodyclose
+  enable:
+    # ── Correctness ──────────────────────────────────────────────────────────
+    - errcheck # Enforce: Every function returning an error must have its error checked. Fix: Use 'if err != nil' or explicitly ignore with '_ ='.
+    - govet # Enforce: Fix standard go vet violations (printf format mismatches, unreachable code, etc.). Fix: Follow 'go vet' suggestions.
+    - staticcheck # Enforce: Use idiomatic and bug-free Go code. Fix: Replace deprecated functions and fix logic flaws identified.
+    - ineffassign # Enforce: Avoid dead assignments. Fix: Remove variables that are assigned but never read before being overwritten.
+    - unused # Enforce: Keep codebase clean. Fix: Delete unexported constants, variables, types, and functions that are never referenced.
+    - nilerr # Enforce: Do not hide errors. Fix: If 'err != nil', return 'err' itself — never return 'nil' in that branch.
+    - errorlint # Enforce: Support error wrapping. Fix: Use 'errors.Is' for comparisons, 'errors.As' for type assertions, and '%w' in fmt.Errorf.
+    - nolintlint # Enforce: Manage linter exclusions. Fix: Ensure //nolint directives are necessary, specific, and explained.
+    - bodyclose # Enforce: Prevent resource leaks. Fix: Always 'defer resp.Body.Close()' immediately after checking the error from an HTTP call.
+    - durationcheck # Enforce: Correct time math. Fix: Never multiply two time.Duration values together; multiply a duration by a plain integer instead.
+    - forbidigo # Enforce: Forbid the use of certain patterns
+    - sloglint # Enforce: Correct and performant 'slog' usage.
+    - iface # Enforce: Interface design hygiene. Fix: Remove single-method interfaces that duplicate an existing stdlib interface; use the stdlib one instead.
+    - dupl # Enforce: Avoid copy-paste code. Fix: Extract duplicated code blocks into shared functions or generics.
+
+    # ── Security & Safety ────────────────────────────────────────────────────
+    - copyloopvar # Enforce: Loop variable safety. Fix: Remove legacy 'v := v' workarounds introduced before Go 1.22; the compiler now re-scopes loop variables per iteration automatically.
+
+    # ── Clean Code & Performance ─────────────────────────────────────────────
+    - revive # Enforce: General best practices. Fix: Follow specific rule recommendations below.
+    - gocritic # Enforce: Code diagnostics and refactoring suggestions. Fix: Apply suggested idiomatic improvements.
+    - unparam # Enforce: Clean function signatures. Fix: Remove or generalise parameters that always receive the same constant argument.
+
+    # ── Style / Simplification ───────────────────────────────────────────────
+    - unconvert # Enforce: Minimise noise. Fix: Remove redundant type conversions (e.g. int(myInt) where myInt is already an int).
+    - misspell # Enforce: Professional documentation. Fix: Correct English spelling errors in comments and string literals; run 'misspell -w ./...' to auto-correct.
+
+  settings:
+    errcheck:
+      check-type-assertions: true # Enforce: The 'ok' boolean on every type assertion must be checked. Fix: Use 'v, ok := x.(T)' and handle the false case.
+      check-blank: false # Enforce: '_ = f()' is permitted to explicitly ignore errors. Change to true to audit all such suppressions.
+    govet:
+      enable:
+        - shadow # Enforce: Variable clarity. Fix: Rename variables in inner scopes that shadow an outer-scope variable to avoid silent overwrites.
+    errorlint:
+      errorf: true # Enforce: Use '%w' (not '%v') in fmt.Errorf so callers can unwrap with errors.Is / errors.As.
+      asserts: true # Enforce: Never type-assert directly on an error value. Fix: Use 'errors.As(err, &target)' instead.
+      comparison: true # Enforce: Never compare errors with '=='. Fix: Use 'errors.Is(err, ErrFoo)' to handle wrapped errors correctly.
+    gosec:
+      excludes:
+        - G104 # Ignore: Duplicate of errcheck (unhandled errors); already caught above, excluded here to avoid duplicate noise.
+        - G115 # Ignore: Integer overflow conversion; very noisy for general code — re-enable only if the package performs heavy integer math.
+    nolintlint:
+      allow-unused: false # Enforce: Delete '//nolint' comments that no longer suppress anything.
+      require-explanation: true # Enforce: Every //nolint must be followed by a reason (e.g. //nolint:errcheck // intentionally ignored because...).
+      require-specific: true # Enforce: Bare '//nolint' is forbidden. Fix: Always name the linter being suppressed, e.g. '//nolint:unparam'.
+    forbidigo:
+      forbid:
+        - pattern: ^log\..*$
+          msg: "Use 'log/slog' instead of the standard 'log' package for structured logging."
+        - pattern: ^fmt\.Print.*$
+          msg: "Do not use fmt for logging; use 'log/slog' instead."
+      analyze-types: true
+    sloglint:
+      kv-only: true
+      static-msg: true # Enforce: Static log messages for better aggregation. Fix: Move dynamic data to Attrs.
+      key-naming-case: snake # Enforce: Consistent key casing for log parsers. Fix: Use snake_case for all keys.
+      msg-style: capitalized # Enforce: Sentence-case log messages. Fix: Capitalize the first letter of messages.
+      forbidden-keys: # Enforce: Clean schema for log aggregators. Fix: Remove reserved or redundant keys.
+        - time
+        - level
+        - msg
+        - source
+    revive:
+      rules:
+        # ── Robustness ───────────────────────────────────────────────────────
+        - name: waitgroup-by-value # Enforce: Concurrency safety. Fix: Pass sync.WaitGroup by pointer (*sync.WaitGroup), never by value; copying it breaks Add/Done coordination.
+        - name: use-waitgroup-go # Enforce: Prefer the safer WaitGroup API (Go 1.25+). Fix: Replace the 'wg.Add(1) / go func() { defer wg.Done(); ... }()' idiom with 'wg.Go(func() { ... })'.
+        - name: atomic # Enforce: Thread safety. Fix: Use sync/atomic operations (atomic.Load, atomic.Store, etc.) for variables shared across goroutines; naked reads/writes are data races.
+        - name: context-keys-type # Enforce: Context key safety. Fix: Define context keys as unexported custom types (not string or int) to prevent collisions between packages.
+        - name: deep-exit # Enforce: Orderly shutdown. Fix: Restrict os.Exit and log.Fatal to main() and init(); everywhere else return an error so callers can handle or wrap it.
+
+        # ── Clean Code ───────────────────────────────────────────────────────
+        - name: indent-error-flow # Enforce: Happy-path left-alignment. Fix: Remove 'else' blocks that follow a 'return', 'continue', or 'break'; the else branch becomes the new straight-line path.
+        - name: early-return # Enforce: Reduced nesting. Fix: Use guard clauses (return early on error or invalid input) instead of deeply nested if/else trees.
+        - name: cognitive-complexity # Enforce: Function complexity budget. Fix: Split complex functions until each scores below the limit.
+          arguments: [15]
+        - name: confusing-results # Enforce: API clarity. Fix: When a function returns multiple values of the same type, add named return parameters so callers know what each value represents.
+        - name: unexported-return # Enforce: Encapsulation. Fix: Exported functions must not return unexported types; expose an interface or promote the type to exported.
+        - name: argument-limit # Enforce: Readable signatures (default limit: 8). Fix: If a function exceeds the limit, group related parameters into a configuration struct or options type.
+        - name: function-result-limit # Enforce: Simple return signatures (default limit: 3). Fix: If a function returns more values than the limit, group related results into a struct.
+
+        # ── Idiomatic Go ─────────────────────────────────────────────────────
+        - name: var-naming # Enforce: Standard Go initialisms. Fix: Use 'URL' not 'Url', 'ID' not 'Id', 'HTTP' not 'Http', 'JSON' not 'Json'.
+        - name: context-as-argument # Enforce: Stdlib convention. Fix: 'ctx context.Context' must always be the first parameter of a function, named 'ctx'.
+        - name: error-return # Enforce: Stdlib convention. Fix: 'error' must be the last value in any multi-return signature.
+        - name: error-strings # Enforce: Idiomatic error messages. Fix: Error strings must be lowercase and must not end with punctuation.
+        - name: error-naming # Enforce: Sentinel error naming. Fix: Name package-level error variables with the 'Err' prefix (e.g. var ErrNotFound = errors.New(...)).
+        - name: receiver-naming # Enforce: Consistency. Fix: Use the same short receiver name (1–2 letters derived from the type) across all methods of a type.
+        - name: dot-imports # Enforce: Explicit identifiers. Fix: Never use dot imports ('import . "pkg"'); always reference identifiers through the package name or a named alias.
+        - name: blank-imports # Enforce: Minimal side effects. Fix: Restrict side-effect imports ('import _ "pkg"') to main or test files; add a comment explaining the side effect if required.
+
+formatters:
+  enable:
+    - gofmt # Enforce: Canonical Go formatting. Fix: Run 'gofmt -w .' to auto-correct indentation, braces, and spacing; CI rejects unformatted files.
+    - goimports # Enforce: Clean, grouped imports. Fix: Run 'goimports -w .' to automatically group imports into stdlib / external / internal blocks and remove unused entries.
+
+issues:
+  max-issues-per-linter: 0 # Report every issue from every linter, not just the first 10 (the default cap).
+  max-same-issues: 0 # Report every occurrence of a repeated issue, not just the first 3 (the default cap).
+
+severity:
+  default: error
+  rules:
+    - linters:
+        - nolintlint
+      severity: warning
