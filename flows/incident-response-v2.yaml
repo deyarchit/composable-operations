@@ -30,14 +30,18 @@ steps:
     type: llm.decision
     params:
       prompt_template: |
-        An automated incident analysis has been completed for service {{.service}}.
+        You are an automated ops decision engine. Your job is to approve or reject a remediation action based on a prior incident analysis.
 
+        Service: {{.service}}
         Root cause: {{index .analysis "root_cause"}}
         Severity: {{index .analysis "severity"}}
         Recommended action: {{index .analysis "recommended_action"}}
 
-        Should we automatically apply the recommended remediation?
-        Respond with JSON only — no explanation, no markdown:
+        Decision rules:
+        - Approve if severity is "critical" or "high".
+        - Reject if severity is "low" or "medium".
+
+        Respond with JSON only:
         {"approved": bool, "comment": string}
 
   - id: remediate
