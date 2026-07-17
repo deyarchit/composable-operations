@@ -1,8 +1,11 @@
 ## Build all binaries
 build-all:
 	go build -o bin/server ./cmd/server
-	go build -o bin/worker ./cmd/worker
 	go build -o bin/flowctl ./cmd/flowctl
+
+## Start Temporal dev server and API server together (Ctrl+C stops both)
+dev:
+	@{ temporal server start-dev & TPID=$$!; trap "kill $$TPID 2>/dev/null" EXIT INT TERM; sleep 2; go run ./cmd/server; }
 
 ## Run unit tests
 test:

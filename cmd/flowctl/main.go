@@ -169,7 +169,7 @@ func promptApproval(apiURL, runID string, req *core.ApprovalRequest) error {
 	_, _ = fmt.Fprintf(os.Stdout, "Prompt: %s\n", req.Prompt)
 	_, _ = fmt.Fprintln(os.Stdout, "Payload:")
 	for k, v := range req.Payload {
-		_, _ = fmt.Fprintf(os.Stdout, "  %s: %v\n", k, v)
+		_, _ = fmt.Fprintf(os.Stdout, "  %s: %s\n", k, formatValue(v))
 	}
 
 	_, _ = fmt.Fprint(os.Stdout, "\nApprove? (yes/no): ")
@@ -212,6 +212,18 @@ func resolveMockData(flowsDir, flowName string) string {
 		}
 	}
 	return filepath.Join(flowsDir, flowName+".sample.json")
+}
+
+// formatValue prints scalars inline and pretty-prints maps/slices as indented JSON.
+func formatValue(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.MarshalIndent(v, "    ", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
 }
 
 func envOr(key, fallback string) string {

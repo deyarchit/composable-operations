@@ -26,6 +26,8 @@ steps:
         Recent logs:
         {{range .logs}}- {{.}}
         {{end}}
+        Available remediation: scale the pgbouncer deployment horizontally by adding replicas to increase total connection pool capacity.
+
         Respond with JSON only — no explanation, no markdown:
         {"root_cause": string, "severity": "critical"|"high"|"medium"|"low", "recommended_action": string}
 

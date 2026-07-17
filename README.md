@@ -12,43 +12,33 @@ The demo scenario is an **incident-response pipeline**: check service metrics, c
 |------|---------|---------|
 | Go 1.21+ | Build the binaries | https://go.dev/dl |
 | Temporal CLI | Local Temporal server (no Docker needed) | https://docs.temporal.io/cli#install |
-| Ollama | Run LLMs locally | https://ollama.com |
-
-### Start Temporal (pick one)
-
-**Option A — Temporal CLI (recommended, no Docker):**
-```bash
-temporal server start-dev
-```
-Web UI: http://localhost:8233
-
-**Option B — Docker:**
-```bash
-docker run --rm -p 7233:7233 -p 8233:8233 temporalio/temporal-dev-server
-```
-
-### Start Ollama and pull a model
-
-```bash
-ollama serve            # if not already running as a service
-ollama pull llama3.2    # or any model you prefer
-```
+| Ollama | Run LLMs locally (only if `LLM_PROVIDER=ollama`) | https://ollama.com |
 
 ---
 
-## Running the demo
+## Quickstart
 
-Open two terminals.
+### 1. Configure environment
 
-### Terminal 1 — Server (API + worker)
+Copy the example env file and fill in the values for your chosen LLM provider:
 
 ```bash
-go run ./cmd/server
+cp .env.example .env
 ```
 
-Starts the HTTP API on `:8080` and registers the Temporal worker in the same process.
+### 2. Start Temporal and the server
 
-### Terminal 2 — CLI
+```bash
+make dev
+```
+
+This starts the Temporal dev server in the background, waits for it to be ready, then starts the API + worker process. Ctrl+C stops both.
+
+Temporal web UI is available at http://localhost:8233 while the server is running.
+
+### 3. Run a flow
+
+Open a second terminal.
 
 **v1: Human-in-the-loop** (you will be prompted to approve or reject remediation):
 
@@ -62,7 +52,38 @@ go run ./cmd/flowctl run --flow incident-response-v1
 go run ./cmd/flowctl run --flow incident-response-v2
 ```
 
-The CLI polls the run status, renders per-step progress, and — for v1 — prompts you to approve or reject when the flow reaches the human gate.
+The CLI polls the run status, renders per-step progress in place, and for v1 prompts you to approve or reject when the flow reaches the human gate.
+
+---
+
+## LLM providers
+
+Set `LLM_PROVIDER` in `.env` to select the backend.
+
+### Ollama (default, local, no API key)
+
+```
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+```
+
+Start Ollama and pull a model before running:
+
+```bash
+ollama serve          # if not already running as a service
+ollama pull llama3.2
+```
+
+### Claude (Anthropic API)
+
+```
+LLM_PROVIDER=claude
+ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-sonnet-4-6
+```
+
+No local model required. `CLAUDE_MODEL` defaults to `claude-sonnet-4-6` if omitted.
 
 ---
 
@@ -70,9 +91,11 @@ The CLI polls the run status, renders per-step progress, and — for v1 — prom
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `ollama` | LLM backend to use |
+| `LLM_PROVIDER` | `ollama` | LLM backend: `ollama` or `claude` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `llama3.2` | Model to use for all LLM steps |
+| `OLLAMA_MODEL` | `llama3.2` | Model name for Ollama |
+| `ANTHROPIC_API_KEY` | _(required for claude)_ | Anthropic API key |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Model name for Claude |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server address |
 | `FLOWS_DIR` | `flows` | Directory containing YAML flow definitions |
 | `LISTEN_ADDR` | `:8080` | HTTP API listen address |
@@ -83,21 +106,34 @@ The CLI polls the run status, renders per-step progress, and — for v1 — prom
 
 | File | Description |
 |------|-------------|
-| `flows/incident-response-v1.yaml` | 5-step HITL pipeline: metrics → logs → LLM analysis → human approval → remediate |
-| `flows/incident-response-v2.yaml` | Same pipeline with LLM decision replacing the human gate |
-| `flows/incident-response.sample.json` | Sample trigger payload for the CLI |
+| `flows/incident-response-v1.yaml` | 5-step HITL pipeline: metrics check → logs check → LLM analysis → human approval → remediate |
+| `flows/incident-response-v2.yaml` | Same pipeline with an LLM decision step replacing the human gate |
+| `flows/incident-response.sample.json` | Sample trigger payload (PgBouncer pool-exhaustion scenario) |
 
-The fixture metrics and log lines are embedded in the YAML `params` so the demo runs without real infrastructure. In production, swap `metrics.check` and `logs.check` for ops that call Prometheus, Loki, etc.
+### How sample data works
+
+Each flow YAML declares which sample file to use via the `mock_data` field:
+
+```yaml
+name: incident-response
+mock_data: incident-response.sample.json
+steps:
+  ...
+```
+
+When `flowctl` starts a run it loads the named JSON file and uses it as the initial input envelope. Ops like `metrics.check` and `logs.check` are pass-through in demo mode: they read fields already present in the envelope (cpu_usage, logs, etc.) and forward them unchanged. In production, replace those ops with implementations that call Prometheus, Loki, etc.
 
 ---
 
 ## Adding a new op type
 
-1. Implement `core.Operation` (and `core.ActivityOp` or `core.HumanGate`) in `internal/ops/`.
+1. Create a file in `internal/ops/` and implement `core.Operation`.
+   - Activity ops implement `Execute(ctx, input, params)`.
+   - Human gate ops implement the `core.HumanGate` interface.
 2. Register it in `internal/ops/register.go` via `RegisterBuiltins`.
 3. Reference the new `type` in any flow YAML.
 
-No workflow code changes needed — the engine dispatches by type name via the registry.
+No workflow code changes needed. The engine dispatches by type name through the registry at load time.
 
 ---
 
@@ -106,7 +142,7 @@ No workflow code changes needed — the engine dispatches by type name via the r
 ```bash
 make fmt        # format
 make lint       # lint (must pass with zero warnings)
-make build-all  # compile all binaries
+make build-all  # compile server and flowctl binaries
 make test       # run unit + integration tests
-make pr         # run all checks (fmt + lint + build + test)
+make dev        # start Temporal + server (Ctrl+C stops both)
 ```
