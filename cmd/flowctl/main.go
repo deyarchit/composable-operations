@@ -9,11 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"composable-operations/internal/core"
 )
+
+var versionSuffix = regexp.MustCompile(`-v\d+$`)
 
 func main() {
 	runCmd := flag.NewFlagSet("run", flag.ExitOnError)
@@ -36,8 +39,14 @@ func main() {
 
 	inputPath := *inputFile
 	if inputPath == "" {
-		// Convention: flows/<name>.sample.json holds a canned trigger payload.
 		inputPath = fmt.Sprintf("flows/%s.sample.json", *flowName)
+		if _, statErr := os.Stat(inputPath); os.IsNotExist(statErr) {
+			// Fall back to the base name without a version suffix (-v1, -v2, …)
+			// so incident-response-v1 and incident-response-v2 both find
+			// flows/incident-response.sample.json automatically.
+			base := versionSuffix.ReplaceAllString(*flowName, "")
+			inputPath = fmt.Sprintf("flows/%s.sample.json", base)
+		}
 	}
 
 	inputData, readErr := os.ReadFile(inputPath) //nolint:gosec // path from flags, operator-controlled
