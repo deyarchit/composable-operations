@@ -89,26 +89,31 @@ func startRun(apiURL, flowName string, input map[string]any) (string, error) {
 }
 
 func pollLoop(apiURL, runID string) error {
+	var prevLines int
 	for {
 		status, err := getStatus(apiURL, runID)
 		if err != nil {
 			return err
 		}
 
-		renderStatus(status)
-
 		switch status.State {
 		case core.RunCompleted:
-			_, _ = fmt.Fprintln(os.Stdout, "\nCompleted.")
+			renderStatus(status, prevLines)
+			_, _ = fmt.Fprintln(os.Stdout, "Completed.")
 			return nil
 		case core.RunFailed:
+			renderStatus(status, prevLines)
 			return fmt.Errorf("run failed: %s", status.Error)
 		case core.RunWaitingApproval:
+			renderStatus(status, prevLines)
+			prevLines = 0 // approval prompt prints below; don't overwrite it next tick
 			if status.ApprovalRequest != nil {
 				if approvalErr := promptApproval(apiURL, runID, status.ApprovalRequest); approvalErr != nil {
 					return approvalErr
 				}
 			}
+		default:
+			prevLines = renderStatus(status, prevLines)
 		}
 
 		time.Sleep(2 * time.Second)
@@ -132,13 +137,18 @@ func getStatus(apiURL, runID string) (*core.RunStatus, error) {
 	return &status, nil
 }
 
-func renderStatus(status *core.RunStatus) {
-	_, _ = fmt.Fprintf(os.Stdout, "\rRun %s - %s", status.RunID[:8], status.State)
-	for _, step := range status.Steps {
-		icon := stepIcon(step.Status)
-		_, _ = fmt.Fprintf(os.Stdout, "\n  %s %s", icon, step.StepID)
+// renderStatus draws the current run state, overwriting the previous render.
+// prevLines is the number of lines printed last time (0 on first call).
+// Returns the number of lines printed this call.
+func renderStatus(status *core.RunStatus, prevLines int) int {
+	if prevLines > 0 {
+		_, _ = fmt.Fprintf(os.Stdout, "\033[%dA\033[J", prevLines)
 	}
-	_, _ = fmt.Fprintln(os.Stdout)
+	_, _ = fmt.Fprintf(os.Stdout, "Run %s - %s\n", status.RunID[:8], status.State)
+	for _, step := range status.Steps {
+		_, _ = fmt.Fprintf(os.Stdout, "  %s %s\n", stepIcon(step.Status), step.StepID)
+	}
+	return 1 + len(status.Steps)
 }
 
 func stepIcon(s core.StepStatus) string {
