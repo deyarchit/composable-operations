@@ -29,8 +29,9 @@ type StepConfig struct {
 
 // FlowDefinition is the parsed, validated form of a flow YAML file.
 type FlowDefinition struct {
-	Name  string       `yaml:"name"`
-	Steps []StepConfig `yaml:"steps"`
+	Name     string       `yaml:"name"`
+	MockData string       `yaml:"mock_data,omitempty"`
+	Steps    []StepConfig `yaml:"steps"`
 }
 
 // ApprovalRequest is produced by a HumanGate op and surfaced by GET /runs/{id}

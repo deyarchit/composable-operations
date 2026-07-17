@@ -1,4 +1,5 @@
 name: incident-response
+mock_data: incident-response.sample.json
 steps:
   - id: check-metrics
     type: metrics.check

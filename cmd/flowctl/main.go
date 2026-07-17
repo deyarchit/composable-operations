@@ -9,14 +9,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"regexp"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"composable-operations/internal/core"
 )
-
-var versionSuffix = regexp.MustCompile(`-v\d+$`)
 
 func main() {
 	runCmd := flag.NewFlagSet("run", flag.ExitOnError)
@@ -37,16 +37,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	flowsDir := envOr("FLOWS_DIR", "flows")
+
 	inputPath := *inputFile
 	if inputPath == "" {
-		inputPath = fmt.Sprintf("flows/%s.sample.json", *flowName)
-		if _, statErr := os.Stat(inputPath); os.IsNotExist(statErr) {
-			// Fall back to the base name without a version suffix (-v1, -v2, …)
-			// so incident-response-v1 and incident-response-v2 both find
-			// flows/incident-response.sample.json automatically.
-			base := versionSuffix.ReplaceAllString(*flowName, "")
-			inputPath = fmt.Sprintf("flows/%s.sample.json", base)
-		}
+		inputPath = resolveMockData(flowsDir, *flowName)
 	}
 
 	inputData, readErr := os.ReadFile(inputPath) //nolint:gosec // path from flags, operator-controlled
@@ -193,6 +188,20 @@ func promptApproval(apiURL, runID string, req *core.ApprovalRequest) error {
 		return fmt.Errorf("submit approval: %s: %s", resp.Status, b)
 	}
 	return nil
+}
+
+// resolveMockData returns the input file path for a flow. It reads the flow's
+// YAML to find the mock_data field; if absent it falls back to
+// <flowsDir>/<flowName>.sample.json.
+func resolveMockData(flowsDir, flowName string) string {
+	yamlPath := filepath.Join(flowsDir, flowName+".yaml")
+	if data, err := os.ReadFile(yamlPath); err == nil { //nolint:gosec // operator-controlled path
+		var def core.FlowDefinition
+		if yaml.Unmarshal(data, &def) == nil && def.MockData != "" {
+			return filepath.Join(flowsDir, def.MockData)
+		}
+	}
+	return filepath.Join(flowsDir, flowName+".sample.json")
 }
 
 func envOr(key, fallback string) string {
