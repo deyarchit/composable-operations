@@ -19,6 +19,9 @@ steps:
         CPU Usage: {{.cpu_usage}}
         Error Rate: {{.error_rate}}
         P99 Latency: {{.p99_latency_ms}}ms
+        PgBouncer pool size: {{.pgbouncer_pool_size}} (max connections)
+        PgBouncer active connections: {{.pgbouncer_active_connections}} in use
+        PgBouncer wait queue: {{.pgbouncer_wait_queue}} queries waiting
 
         Recent logs:
         {{range .logs}}- {{.}}
@@ -29,14 +32,18 @@ steps:
   - id: human-review
     type: human.approval
     params:
-      prompt: "Incident detected. Review the analysis and approve or reject remediation."
+      prompt: "PgBouncer pool exhausted on payment-api. Review the analysis and approve or reject scaling pgbouncer to 6 replicas."
       display_fields:
         - service
-        - cpu_usage
-        - error_rate
+        - pgbouncer_pool_size
+        - pgbouncer_active_connections
+        - pgbouncer_wait_queue
         - analysis
 
   - id: remediate
     type: remediate
     params:
-      endpoint: "https://ops.internal/remediate"
+      deployment: pgbouncer
+      namespace: data
+      replicas: 6
+      endpoint: "https://k8s.internal/apis/apps/v1/namespaces/data/deployments/pgbouncer/scale"

@@ -75,11 +75,17 @@ steps:
   - id: same-id
     type: remediate
     params:
-      endpoint: "http://ops.internal"
+      deployment: pgbouncer
+      namespace: data
+      replicas: 6
+      endpoint: "https://k8s.internal/scale"
   - id: same-id
     type: remediate
     params:
-      endpoint: "http://ops.internal"
+      deployment: pgbouncer
+      namespace: data
+      replicas: 6
+      endpoint: "https://k8s.internal/scale"
 `)
 	l := newTestLoader(t, dir)
 

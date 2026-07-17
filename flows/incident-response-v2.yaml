@@ -19,6 +19,9 @@ steps:
         CPU Usage: {{.cpu_usage}}
         Error Rate: {{.error_rate}}
         P99 Latency: {{.p99_latency_ms}}ms
+        PgBouncer pool size: {{.pgbouncer_pool_size}} (max connections)
+        PgBouncer active connections: {{.pgbouncer_active_connections}} in use
+        PgBouncer wait queue: {{.pgbouncer_wait_queue}} queries waiting
 
         Recent logs:
         {{range .logs}}- {{.}}
@@ -36,6 +39,7 @@ steps:
         Root cause: {{index .analysis "root_cause"}}
         Severity: {{index .analysis "severity"}}
         Recommended action: {{index .analysis "recommended_action"}}
+        Proposed fix: scale pgbouncer deployment in namespace data to 6 replicas.
 
         Decision rules:
         - Approve if severity is "critical" or "high".
@@ -47,4 +51,7 @@ steps:
   - id: remediate
     type: remediate
     params:
-      endpoint: "https://ops.internal/remediate"
+      deployment: pgbouncer
+      namespace: data
+      replicas: 6
+      endpoint: "https://k8s.internal/apis/apps/v1/namespaces/data/deployments/pgbouncer/scale"

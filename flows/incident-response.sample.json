@@ -5,10 +5,13 @@
   "cpu_usage": 0.92,
   "error_rate": 0.15,
   "p99_latency_ms": 2400,
+  "pgbouncer_pool_size": 20,
+  "pgbouncer_active_connections": 20,
+  "pgbouncer_wait_queue": 47,
   "logs": [
-    "ERROR payment-api: timeout connecting to postgres after 30s",
-    "ERROR payment-api: timeout connecting to postgres after 30s",
-    "WARN  payment-api: circuit breaker open for downstream db",
+    "ERROR payment-api: pgbouncer pool exhausted, max_client_conn=20 reached",
+    "WARN  payment-api: client wait queue depth: 47 connections pending",
+    "ERROR payment-api: timeout waiting for pgbouncer connection after 30s",
     "ERROR payment-api: 5xx rate exceeds threshold (15%)"
   ]
 }
