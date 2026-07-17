@@ -38,25 +38,17 @@ ollama pull llama3.2    # or any model you prefer
 
 ## Running the demo
 
-Open three terminals.
+Open two terminals.
 
-### Terminal 1 — Worker
-
-```bash
-OLLAMA_MODEL=llama3.2 go run ./cmd/worker
-```
-
-The worker connects to Temporal and registers the RunFlow workflow and ExecuteOperation activity.
-
-### Terminal 2 — API server
+### Terminal 1 — Server (API + worker)
 
 ```bash
-OLLAMA_MODEL=llama3.2 go run ./cmd/server
+go run ./cmd/server
 ```
 
-Starts the HTTP API on `:8080`.
+Starts the HTTP API on `:8080` and registers the Temporal worker in the same process.
 
-### Terminal 3 — CLI
+### Terminal 2 — CLI
 
 **v1: Human-in-the-loop** (you will be prompted to approve or reject remediation):
 

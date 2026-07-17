@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -27,6 +28,8 @@ func main() {
 }
 
 func run() error {
+	_ = godotenv.Load() // load .env if present; silently ignored when absent
+
 	temporalAddr := envOr("TEMPORAL_ADDRESS", "localhost:7233")
 	flowsDir := envOr("FLOWS_DIR", "flows")
 	listenAddr := envOr("LISTEN_ADDR", ":8080")
