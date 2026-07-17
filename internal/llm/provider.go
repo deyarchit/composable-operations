@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -25,6 +26,7 @@ func NewChatModel(ctx context.Context) (ChatModel, error) {
 			BaseURL: envOr("OLLAMA_BASE_URL", "http://localhost:11434"),
 			Model:   envOr("OLLAMA_MODEL", "llama3.2"),
 			Timeout: 120 * time.Second,
+			Format:  json.RawMessage(`"json"`),
 		})
 	default:
 		return nil, fmt.Errorf("unknown LLM_PROVIDER %q; supported values: ollama", provider)
