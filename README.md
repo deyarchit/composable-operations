@@ -65,7 +65,7 @@ Set `LLM_PROVIDER` in `.env` to select the backend.
 ```
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+OLLAMA_MODEL=gemma3:4b
 ```
 
 Start Ollama and pull a model before running:
@@ -93,7 +93,7 @@ No local model required. `CLAUDE_MODEL` defaults to `claude-sonnet-4-6` if omitt
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `ollama` | LLM backend: `ollama` or `claude` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `llama3.2` | Model name for Ollama |
+| `OLLAMA_MODEL` | `gemma3:4b` | Model name for Ollama |
 | `ANTHROPIC_API_KEY` | _(required for claude)_ | Anthropic API key |
 | `CLAUDE_MODEL` | `claude-sonnet-4-6` | Model name for Claude |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server address |

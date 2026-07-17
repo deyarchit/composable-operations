@@ -31,7 +31,7 @@ func NewChatModel(ctx context.Context) (ChatModel, error) {
 	case "ollama":
 		return ollama.NewChatModel(ctx, &ollama.ChatModelConfig{
 			BaseURL: envOr("OLLAMA_BASE_URL", "http://localhost:11434"),
-			Model:   envOr("OLLAMA_MODEL", "llama3.2"),
+			Model:   envOr("OLLAMA_MODEL", "gemma3:4b"),
 			Timeout: 120 * time.Second,
 			Format:  json.RawMessage(`"json"`),
 		})
