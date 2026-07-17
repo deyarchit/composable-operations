@@ -2,21 +2,11 @@ name: incident-response
 steps:
   - id: check-metrics
     type: metrics.check
-    params:
-      fixture:
-        service: payment-api
-        cpu_usage: 0.92
-        error_rate: 0.15
-        p99_latency_ms: 2400
+    params: {}
 
   - id: check-logs
     type: logs.check
-    params:
-      fixture:
-        - "ERROR payment-api: timeout connecting to postgres after 30s"
-        - "ERROR payment-api: timeout connecting to postgres after 30s"
-        - "WARN  payment-api: circuit breaker open for downstream db"
-        - "ERROR payment-api: 5xx rate exceeds threshold (15%)"
+    params: {}
 
   - id: analyze-incident
     type: llm.analyze

@@ -1,4 +1,14 @@
 {
   "trigger": "alert",
-  "alert_id": "ALT-20240117-001"
+  "alert_id": "ALT-20240117-001",
+  "service": "payment-api",
+  "cpu_usage": 0.92,
+  "error_rate": 0.15,
+  "p99_latency_ms": 2400,
+  "logs": [
+    "ERROR payment-api: timeout connecting to postgres after 30s",
+    "ERROR payment-api: timeout connecting to postgres after 30s",
+    "WARN  payment-api: circuit breaker open for downstream db",
+    "ERROR payment-api: 5xx rate exceeds threshold (15%)"
+  ]
 }

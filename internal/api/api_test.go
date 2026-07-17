@@ -133,10 +133,7 @@ name: test-flow
 steps:
   - id: check-metrics
     type: metrics.check
-    params:
-      fixture:
-        service: api
-        cpu: 0.5
+    params: {}
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "test-flow.yaml"), []byte(yaml), 0o600))
 	return dir

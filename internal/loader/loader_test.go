@@ -34,15 +34,10 @@ name: simple
 steps:
   - id: check-metrics
     type: metrics.check
-    params:
-      fixture:
-        service: api
-        cpu_usage: 0.9
+    params: {}
   - id: check-logs
     type: logs.check
-    params:
-      fixture:
-        - "ERROR: timeout"
+    params: {}
 `)
 	l := newTestLoader(t, dir)
 

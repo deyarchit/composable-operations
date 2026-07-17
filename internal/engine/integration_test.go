@@ -57,7 +57,7 @@ func (s *IntegrationSuite) TestIncidentResponseV1_HumanApproves_Remediates() {
 
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
 		Definition: incidentV1Def(),
-		Input:      core.Envelope{"trigger": "alert", "alert_id": "ALT-001"},
+		Input:      fixtureEnvelope("ALT-001"),
 	})
 
 	s.Require().True(s.env.IsWorkflowCompleted())
@@ -87,7 +87,7 @@ func (s *IntegrationSuite) TestIncidentResponseV1_HumanRejects_RunFails() {
 
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
 		Definition: incidentV1Def(),
-		Input:      core.Envelope{"trigger": "alert"},
+		Input:      fixtureEnvelope("ALT-001"),
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
@@ -98,7 +98,7 @@ func (s *IntegrationSuite) TestIncidentResponseV1_HumanRejects_RunFails() {
 func (s *IntegrationSuite) TestIncidentResponseV2_LLMDecides_Remediates() {
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
 		Definition: incidentV2Def(),
-		Input:      core.Envelope{"trigger": "alert", "alert_id": "ALT-002"},
+		Input:      fixtureEnvelope("ALT-002"),
 	})
 
 	s.Require().True(s.env.IsWorkflowCompleted())
@@ -114,6 +114,23 @@ func (s *IntegrationSuite) TestIncidentResponseV2_LLMDecides_Remediates() {
 	s.Equal("llm", decision["by"], "v2 decision must come from LLM, not human")
 }
 
+// --- helpers ---
+
+func fixtureEnvelope(alertID string) core.Envelope {
+	return core.Envelope{
+		"trigger":        "alert",
+		"alert_id":       alertID,
+		"service":        "payment-api",
+		"cpu_usage":      0.92,
+		"error_rate":     0.15,
+		"p99_latency_ms": float64(2400),
+		"logs": []any{
+			"ERROR payment-api: timeout connecting to postgres after 30s",
+			"WARN  payment-api: circuit breaker open for downstream db",
+		},
+	}
+}
+
 // --- flow definitions ---
 
 func incidentV1Def() core.FlowDefinition {
@@ -121,26 +138,14 @@ func incidentV1Def() core.FlowDefinition {
 		Name: "incident-response",
 		Steps: []core.StepConfig{
 			{
-				ID:   "check-metrics",
-				Type: "metrics.check",
-				Params: map[string]any{
-					"fixture": map[string]any{
-						"service":        "payment-api",
-						"cpu_usage":      0.92,
-						"error_rate":     0.15,
-						"p99_latency_ms": float64(2400),
-					},
-				},
+				ID:     "check-metrics",
+				Type:   "metrics.check",
+				Params: map[string]any{},
 			},
 			{
-				ID:   "check-logs",
-				Type: "logs.check",
-				Params: map[string]any{
-					"fixture": []any{
-						"ERROR payment-api: timeout connecting to postgres after 30s",
-						"WARN  payment-api: circuit breaker open for downstream db",
-					},
-				},
+				ID:     "check-logs",
+				Type:   "logs.check",
+				Params: map[string]any{},
 			},
 			{
 				ID:   "analyze-incident",

@@ -55,49 +55,34 @@ func TestRegisterBuiltins_DuplicateRegistrationFails(t *testing.T) {
 
 // --- metrics.check ---
 
-func TestMetricsCheckOp_MergesFixtureIntoEnvelope(t *testing.T) {
+func TestMetricsCheckOp_PassesThroughEnvelope(t *testing.T) {
 	reg := newRegistry(t)
 	op, _ := reg.Get("metrics.check")
 	actOp := op.(core.ActivityOp)
 
-	input := core.Envelope{"trigger": "alert"}
-	params := map[string]any{
-		"fixture": map[string]any{"service": "payment-api", "cpu_usage": 0.92},
-	}
+	input := core.Envelope{"trigger": "alert", "service": "payment-api", "cpu_usage": 0.92}
 
-	result, err := actOp.Execute(context.Background(), input, params)
+	result, err := actOp.Execute(context.Background(), input, map[string]any{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "payment-api", result["service"])
 	assert.Equal(t, 0.92, result["cpu_usage"])
-	assert.Equal(t, "alert", result["trigger"], "original fields must be preserved")
-}
-
-func TestMetricsCheckOp_ValidateParams_MissingFixture(t *testing.T) {
-	reg := newRegistry(t)
-	op, _ := reg.Get("metrics.check")
-	require.Error(t, op.ValidateParams(map[string]any{}))
-}
-
-func TestMetricsCheckOp_ValidateParams_EmptyFixture(t *testing.T) {
-	reg := newRegistry(t)
-	op, _ := reg.Get("metrics.check")
-	require.Error(t, op.ValidateParams(map[string]any{"fixture": map[string]any{}}))
+	assert.Equal(t, "alert", result["trigger"])
 }
 
 // --- logs.check ---
 
-func TestLogsCheckOp_SetsLogsField(t *testing.T) {
+func TestLogsCheckOp_PassesThroughEnvelope(t *testing.T) {
 	reg := newRegistry(t)
 	op, _ := reg.Get("logs.check")
 	actOp := op.(core.ActivityOp)
 
-	input := core.Envelope{"service": "api"}
-	params := map[string]any{
-		"fixture": []any{"ERROR: timeout", "WARN: circuit breaker open"},
+	input := core.Envelope{
+		"service": "api",
+		"logs":    []any{"ERROR: timeout", "WARN: circuit breaker open"},
 	}
 
-	result, err := actOp.Execute(context.Background(), input, params)
+	result, err := actOp.Execute(context.Background(), input, map[string]any{})
 
 	require.NoError(t, err)
 	logs, ok := result["logs"].([]any)
@@ -105,12 +90,6 @@ func TestLogsCheckOp_SetsLogsField(t *testing.T) {
 	assert.Len(t, logs, 2)
 	assert.Equal(t, "ERROR: timeout", logs[0])
 	assert.Equal(t, "api", result["service"], "original fields must be preserved")
-}
-
-func TestLogsCheckOp_ValidateParams_MissingFixture(t *testing.T) {
-	reg := newRegistry(t)
-	op, _ := reg.Get("logs.check")
-	require.Error(t, op.ValidateParams(map[string]any{}))
 }
 
 // --- llm.analyze ---
