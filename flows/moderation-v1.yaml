@@ -1,0 +1,44 @@
+name: moderation
+steps:
+  - id: classify-toxicity
+    type: llm.classify
+    params:
+      prompt_template: "Analyze the toxicity of this content and return a score between 0.0 and 1.0: {{.content}}"
+      output_field: toxicity_score
+
+  - id: scan-pii
+    type: pii.scan
+    params:
+      patterns:
+        - '\b\d{3}-\d{2}-\d{4}\b'
+        - '\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'
+        - '\b(?:\d[ -]?){13,16}\b'
+      threshold: 1
+
+  - id: classify-policy
+    type: llm.classify
+    params:
+      prompt_template: "Rate the policy violation severity of this content on a scale of 0.0 to 1.0: {{.content}}"
+      output_field: policy_violation
+
+  - id: compute-score
+    type: score
+    params:
+      weights:
+        toxicity_score: 0.6
+        policy_violation: 0.4
+
+  - id: human-review
+    type: human.approval
+    params:
+      prompt: "Please review this content and decide whether it should be published."
+      display_fields:
+        - content
+        - toxicity_score
+        - pii_found
+        - policy_violation
+        - risk_score
+
+  - id: publish-content
+    type: publish
+    params: {}
