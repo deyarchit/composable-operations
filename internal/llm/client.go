@@ -1,15 +1,8 @@
 package llm
 
-import "context"
+import "github.com/cloudwego/eino/components/model"
 
-// Completion is the result of a single LLM call.
-type Completion struct {
-	Text string
-}
-
-// Client is the seam all LLM ops call through. The concrete provider
-// (Anthropic, OpenAI, etc.) is chosen at startup and injected; ops never
-// reference a provider directly.
-type Client interface {
-	Complete(ctx context.Context, prompt string) (Completion, error)
-}
+// ChatModel is the seam all LLM ops call through. It aliases eino's
+// BaseChatModel so concrete providers (Anthropic, OpenAI, Ollama, etc.) can be
+// wired in via the cloudwego/eino-ext integrations without changing op code.
+type ChatModel = model.BaseChatModel

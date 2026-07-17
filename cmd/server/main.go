@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -36,7 +37,10 @@ func run() error {
 	}
 	defer temporalClient.Close()
 
-	llmClient := &llm.StubClient{}
+	llmClient, err := llm.NewChatModel(context.Background())
+	if err != nil {
+		return err
+	}
 
 	reg := registry.New()
 	if regErr := ops.RegisterBuiltins(reg, llmClient); regErr != nil {

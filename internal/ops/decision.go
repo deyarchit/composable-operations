@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cloudwego/eino/schema"
+
 	"composable-operations/internal/core"
 	"composable-operations/internal/llm"
 )
@@ -15,7 +17,7 @@ import (
 // decision{approved, comment, by} shape as human.approval, making it a
 // drop-in replacement via a YAML-only change.
 type decisionOp struct {
-	client llm.Client
+	client llm.ChatModel
 }
 
 func (o *decisionOp) Type() string      { return "llm.decision" }
@@ -35,7 +37,7 @@ func (o *decisionOp) Execute(ctx context.Context, input core.Envelope, params ma
 		return nil, fmt.Errorf("llm.decision: render template: %w", err)
 	}
 
-	completion, err := o.client.Complete(ctx, prompt)
+	msg, err := o.client.Generate(ctx, []*schema.Message{schema.UserMessage(prompt)})
 	if err != nil {
 		return nil, fmt.Errorf("llm.decision: llm call: %w", err)
 	}
@@ -44,8 +46,8 @@ func (o *decisionOp) Execute(ctx context.Context, input core.Envelope, params ma
 		Approved bool   `json:"approved"`
 		Comment  string `json:"comment"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(completion.Text)), &parsed); err != nil {
-		return nil, fmt.Errorf("llm.decision: parse response %q: %w", completion.Text, err)
+	if err := json.Unmarshal([]byte(strings.TrimSpace(msg.Content)), &parsed); err != nil {
+		return nil, fmt.Errorf("llm.decision: parse response %q: %w", msg.Content, err)
 	}
 
 	out := cloneEnvelope(input)

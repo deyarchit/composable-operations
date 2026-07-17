@@ -4,26 +4,37 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"composable-operations/internal/core"
-	"composable-operations/internal/llm"
 	"composable-operations/internal/ops"
 	"composable-operations/internal/registry"
+	"composable-operations/internal/testutil"
 )
 
-// fixedLLM is a test double that returns a predetermined completion.
+// fixedLLM returns a predetermined message for every prompt, for unit tests
+// that need precise control over the LLM response.
 type fixedLLM struct{ text string }
 
-func (f *fixedLLM) Complete(_ context.Context, _ string) (llm.Completion, error) {
-	return llm.Completion{Text: f.text}, nil
+func (f *fixedLLM) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	return schema.AssistantMessage(f.text, nil), nil
+}
+
+func (f *fixedLLM) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	msg, err := f.Generate(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
 }
 
 func newRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg := registry.New()
-	require.NoError(t, ops.RegisterBuiltins(reg, &llm.StubClient{}))
+	require.NoError(t, ops.RegisterBuiltins(reg, &testutil.StubChatModel{}))
 	return reg
 }
 
@@ -31,115 +42,105 @@ func newRegistry(t *testing.T) *registry.Registry {
 
 func TestRegisterBuiltins_RegistersAllTypes(t *testing.T) {
 	reg := newRegistry(t)
-	for _, typeName := range []string{"llm.classify", "pii.scan", "score", "human.approval", "llm.decision", "publish"} {
+	for _, typeName := range []string{"metrics.check", "logs.check", "llm.analyze", "human.approval", "llm.decision", "remediate"} {
 		assert.True(t, reg.Has(typeName), "expected type %q to be registered", typeName)
 	}
 }
 
 func TestRegisterBuiltins_DuplicateRegistrationFails(t *testing.T) {
 	reg := newRegistry(t)
-	err := ops.RegisterBuiltins(reg, &llm.StubClient{})
+	err := ops.RegisterBuiltins(reg, &testutil.StubChatModel{})
 	require.Error(t, err)
 }
 
-// --- llm.classify ---
+// --- metrics.check ---
 
-func TestClassifyOp_EnrichesEnvelopeWithScore(t *testing.T) {
-	ctx := context.Background()
+func TestMetricsCheckOp_MergesFixtureIntoEnvelope(t *testing.T) {
+	reg := newRegistry(t)
+	op, _ := reg.Get("metrics.check")
+	actOp := op.(core.ActivityOp)
+
+	input := core.Envelope{"trigger": "alert"}
+	params := map[string]any{
+		"fixture": map[string]any{"service": "payment-api", "cpu_usage": 0.92},
+	}
+
+	result, err := actOp.Execute(context.Background(), input, params)
+
+	require.NoError(t, err)
+	assert.Equal(t, "payment-api", result["service"])
+	assert.Equal(t, 0.92, result["cpu_usage"])
+	assert.Equal(t, "alert", result["trigger"], "original fields must be preserved")
+}
+
+func TestMetricsCheckOp_ValidateParams_MissingFixture(t *testing.T) {
+	reg := newRegistry(t)
+	op, _ := reg.Get("metrics.check")
+	require.Error(t, op.ValidateParams(map[string]any{}))
+}
+
+func TestMetricsCheckOp_ValidateParams_EmptyFixture(t *testing.T) {
+	reg := newRegistry(t)
+	op, _ := reg.Get("metrics.check")
+	require.Error(t, op.ValidateParams(map[string]any{"fixture": map[string]any{}}))
+}
+
+// --- logs.check ---
+
+func TestLogsCheckOp_SetsLogsField(t *testing.T) {
+	reg := newRegistry(t)
+	op, _ := reg.Get("logs.check")
+	actOp := op.(core.ActivityOp)
+
+	input := core.Envelope{"service": "api"}
+	params := map[string]any{
+		"fixture": []any{"ERROR: timeout", "WARN: circuit breaker open"},
+	}
+
+	result, err := actOp.Execute(context.Background(), input, params)
+
+	require.NoError(t, err)
+	logs, ok := result["logs"].([]any)
+	require.True(t, ok)
+	assert.Len(t, logs, 2)
+	assert.Equal(t, "ERROR: timeout", logs[0])
+	assert.Equal(t, "api", result["service"], "original fields must be preserved")
+}
+
+func TestLogsCheckOp_ValidateParams_MissingFixture(t *testing.T) {
+	reg := newRegistry(t)
+	op, _ := reg.Get("logs.check")
+	require.Error(t, op.ValidateParams(map[string]any{}))
+}
+
+// --- llm.analyze ---
+
+func TestAnalyzeOp_ParsesStructuredAnalysis(t *testing.T) {
 	reg := registry.New()
-	require.NoError(t, ops.RegisterBuiltins(reg, &fixedLLM{text: "0.75"}))
-	op, _ := reg.Get("llm.classify")
+	require.NoError(t, ops.RegisterBuiltins(reg, &fixedLLM{
+		text: `{"root_cause":"db timeout","severity":"critical","recommended_action":"restart db"}`,
+	}))
+	op, _ := reg.Get("llm.analyze")
 	actOp := op.(core.ActivityOp)
 
-	input := core.Envelope{"content": "some text"}
-	params := map[string]any{
-		"prompt_template": "Analyze: {{.content}}",
-		"output_field":    "toxicity_score",
-	}
+	input := core.Envelope{"service": "api", "cpu_usage": 0.9}
+	params := map[string]any{"prompt_template": "Analyze service {{.service}} with CPU {{.cpu_usage}}"}
 
-	result, err := actOp.Execute(ctx, input, params)
+	result, err := actOp.Execute(context.Background(), input, params)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0.75, result["toxicity_score"])
-	assert.Equal(t, "some text", result["content"], "original fields must be preserved")
+	analysis, ok := result["analysis"].(map[string]any)
+	require.True(t, ok, "analysis field must be a map")
+	assert.Equal(t, "db timeout", analysis["root_cause"])
+	assert.Equal(t, "critical", analysis["severity"])
+	assert.Equal(t, "restart db", analysis["recommended_action"])
+	assert.Equal(t, "api", result["service"], "original fields must be preserved")
 }
 
-func TestClassifyOp_ValidateParams_MissingPromptTemplate(t *testing.T) {
+func TestAnalyzeOp_ValidateParams_MissingPromptTemplate(t *testing.T) {
 	reg := newRegistry(t)
-	op, _ := reg.Get("llm.classify")
-	err := op.ValidateParams(map[string]any{"output_field": "score"})
-	require.Error(t, err)
-}
-
-func TestClassifyOp_ValidateParams_MissingOutputField(t *testing.T) {
-	reg := newRegistry(t)
-	op, _ := reg.Get("llm.classify")
-	err := op.ValidateParams(map[string]any{"prompt_template": "tmpl"})
-	require.Error(t, err)
-}
-
-// --- pii.scan ---
-
-func TestPIIScanOp_DetectsPII(t *testing.T) {
-	ctx := context.Background()
-	reg := newRegistry(t)
-	op, _ := reg.Get("pii.scan")
-	actOp := op.(core.ActivityOp)
-
-	input := core.Envelope{"content": "Call me at john@example.com for details."}
-	params := map[string]any{
-		"patterns":  []any{`\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`},
-		"threshold": 1,
-	}
-
-	result, err := actOp.Execute(ctx, input, params)
-
-	require.NoError(t, err)
-	assert.Equal(t, true, result["pii_found"])
-}
-
-func TestPIIScanOp_NoPIIFound(t *testing.T) {
-	ctx := context.Background()
-	reg := newRegistry(t)
-	op, _ := reg.Get("pii.scan")
-	actOp := op.(core.ActivityOp)
-
-	input := core.Envelope{"content": "This is clean content."}
-	params := map[string]any{
-		"patterns":  []any{`\b\d{3}-\d{2}-\d{4}\b`},
-		"threshold": 1,
-	}
-
-	result, err := actOp.Execute(ctx, input, params)
-
-	require.NoError(t, err)
-	assert.Equal(t, false, result["pii_found"])
-}
-
-// --- score ---
-
-func TestScoreOp_ComputesWeightedSum(t *testing.T) {
-	ctx := context.Background()
-	reg := newRegistry(t)
-	op, _ := reg.Get("score")
-	actOp := op.(core.ActivityOp)
-
-	input := core.Envelope{
-		"toxicity_score":   0.5,
-		"policy_violation": 0.2,
-	}
-	params := map[string]any{
-		"weights": map[string]any{
-			"toxicity_score":   0.6,
-			"policy_violation": 0.4,
-		},
-	}
-
-	result, err := actOp.Execute(ctx, input, params)
-
-	require.NoError(t, err)
-	// 0.5*0.6 + 0.2*0.4 = 0.30 + 0.08 = 0.38
-	assert.InDelta(t, 0.38, result["risk_score"], 1e-9)
+	op, _ := reg.Get("llm.analyze")
+	require.Error(t, op.ValidateParams(map[string]any{}))
 }
 
 // --- human.approval ---
@@ -150,21 +151,22 @@ func TestHumanApprovalOp_BuildsRequestWithDisplayFields(t *testing.T) {
 	gate := op.(core.HumanGate)
 
 	input := core.Envelope{
-		"content":        "Hello world",
-		"toxicity_score": 0.1,
-		"risk_score":     0.05,
+		"service":    "payment-api",
+		"cpu_usage":  0.92,
+		"error_rate": 0.15,
+		"analysis":   map[string]any{"root_cause": "db timeout"},
 	}
 	params := map[string]any{
-		"prompt":         "Review this content",
-		"display_fields": []any{"content", "risk_score"},
+		"prompt":         "Review incident",
+		"display_fields": []any{"service", "analysis"},
 	}
 
 	req := gate.BuildRequest(input, params)
 
-	assert.Equal(t, "Review this content", req.Prompt)
-	assert.Equal(t, "Hello world", req.Payload["content"])
-	assert.Equal(t, 0.05, req.Payload["risk_score"])
-	assert.NotContains(t, req.Payload, "toxicity_score", "non-display fields must be excluded")
+	assert.Equal(t, "Review incident", req.Prompt)
+	assert.Equal(t, "payment-api", req.Payload["service"])
+	assert.NotNil(t, req.Payload["analysis"])
+	assert.NotContains(t, req.Payload, "cpu_usage", "non-display fields must be excluded")
 }
 
 func TestHumanApprovalOp_BuildsRequestWithFullEnvelopeWhenNoDisplayFields(t *testing.T) {
@@ -172,7 +174,7 @@ func TestHumanApprovalOp_BuildsRequestWithFullEnvelopeWhenNoDisplayFields(t *tes
 	op, _ := reg.Get("human.approval")
 	gate := op.(core.HumanGate)
 
-	input := core.Envelope{"content": "text", "risk_score": 0.1}
+	input := core.Envelope{"service": "api", "cpu_usage": 0.9}
 	params := map[string]any{"prompt": "Review"}
 
 	req := gate.BuildRequest(input, params)
@@ -182,93 +184,85 @@ func TestHumanApprovalOp_BuildsRequestWithFullEnvelopeWhenNoDisplayFields(t *tes
 
 // --- llm.decision ---
 
-func TestDecisionOp_EmitsDecisionField(t *testing.T) {
-	ctx := context.Background()
+func TestDecisionOp_EmitsApprovedDecision(t *testing.T) {
 	reg := registry.New()
 	require.NoError(t, ops.RegisterBuiltins(reg, &fixedLLM{
-		text: `{"approved":true,"comment":"Looks good."}`,
+		text: `{"approved":true,"comment":"Remediation is warranted."}`,
 	}))
 	op, _ := reg.Get("llm.decision")
 	actOp := op.(core.ActivityOp)
 
-	input := core.Envelope{"risk_score": 0.2, "content": "hello"}
-	params := map[string]any{
-		"prompt_template": "Approve or reject based on risk score {{.risk_score}}",
-	}
+	input := core.Envelope{"analysis": map[string]any{"root_cause": "db timeout", "severity": "critical", "recommended_action": "restart"}}
+	params := map[string]any{"prompt_template": "Should we remediate? Root cause: {{index .analysis \"root_cause\"}}. Respond with JSON: {\"approved\": bool, \"comment\": string}"}
 
-	result, err := actOp.Execute(ctx, input, params)
+	result, err := actOp.Execute(context.Background(), input, params)
 
 	require.NoError(t, err)
 	decision, ok := result["decision"].(map[string]any)
 	require.True(t, ok, "decision field must be a map")
 	assert.Equal(t, true, decision["approved"])
-	assert.Equal(t, "Looks good.", decision["comment"])
+	assert.Equal(t, "Remediation is warranted.", decision["comment"])
 	assert.Equal(t, "llm", decision["by"])
 }
 
-func TestDecisionOp_EmitsSameShapeAsHumanApproval(t *testing.T) {
-	ctx := context.Background()
+func TestDecisionOp_EmitsRejectedDecision(t *testing.T) {
 	reg := registry.New()
 	require.NoError(t, ops.RegisterBuiltins(reg, &fixedLLM{
-		text: `{"approved":false,"comment":"Too risky."}`,
+		text: `{"approved":false,"comment":"Severity too low for auto-remediation."}`,
 	}))
 	op, _ := reg.Get("llm.decision")
 	actOp := op.(core.ActivityOp)
 
-	input := core.Envelope{"risk_score": 0.9}
-	params := map[string]any{"prompt_template": "Decision for risk {{.risk_score}}"}
+	input := core.Envelope{"analysis": map[string]any{"severity": "low"}}
+	params := map[string]any{"prompt_template": "Decide: {{index .analysis \"severity\"}}. JSON: {\"approved\": bool, \"comment\": string}"}
 
-	result, err := actOp.Execute(ctx, input, params)
+	result, err := actOp.Execute(context.Background(), input, params)
+
 	require.NoError(t, err)
-
 	decision := result["decision"].(map[string]any)
-	assert.Contains(t, decision, "approved")
-	assert.Contains(t, decision, "comment")
-	assert.Contains(t, decision, "by")
+	assert.Equal(t, false, decision["approved"])
+	assert.Equal(t, "llm", decision["by"])
 }
 
-// --- publish ---
+// --- remediate ---
 
-func TestPublishOp_PublishesWhenApproved(t *testing.T) {
-	ctx := context.Background()
+func TestRemediateOp_RemediatesWhenApproved(t *testing.T) {
 	reg := newRegistry(t)
-	op, _ := reg.Get("publish")
+	op, _ := reg.Get("remediate")
 	actOp := op.(core.ActivityOp)
 
 	input := core.Envelope{
-		"content":  "Great post",
-		"decision": map[string]any{"approved": true, "by": "llm", "comment": ""},
+		"analysis": map[string]any{"recommended_action": "restart payment-api"},
+		"decision": map[string]any{"approved": true, "by": "human", "comment": ""},
 	}
 
-	result, err := actOp.Execute(ctx, input, nil)
+	result, err := actOp.Execute(context.Background(), input, map[string]any{"endpoint": "https://ops.internal/remediate"})
 
 	require.NoError(t, err)
-	assert.Equal(t, true, result["published"])
+	assert.Equal(t, true, result["remediated"])
 }
 
-func TestPublishOp_RejectsWhenNotApproved(t *testing.T) {
-	ctx := context.Background()
+func TestRemediateOp_FailsWhenNotApproved(t *testing.T) {
 	reg := newRegistry(t)
-	op, _ := reg.Get("publish")
+	op, _ := reg.Get("remediate")
 	actOp := op.(core.ActivityOp)
 
 	input := core.Envelope{
-		"decision": map[string]any{"approved": false, "by": "human", "comment": "rejected"},
+		"decision": map[string]any{"approved": false, "by": "llm", "comment": "severity too low"},
 	}
 
-	_, err := actOp.Execute(ctx, input, nil)
+	_, err := actOp.Execute(context.Background(), input, map[string]any{"endpoint": "https://ops.internal/remediate"})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not approved")
 }
 
-func TestPublishOp_RejectsWhenDecisionMissing(t *testing.T) {
-	ctx := context.Background()
+func TestRemediateOp_FailsWhenDecisionMissing(t *testing.T) {
 	reg := newRegistry(t)
-	op, _ := reg.Get("publish")
+	op, _ := reg.Get("remediate")
 	actOp := op.(core.ActivityOp)
 
-	_, err := actOp.Execute(ctx, core.Envelope{}, nil)
+	_, err := actOp.Execute(context.Background(), core.Envelope{}, map[string]any{"endpoint": "https://ops.internal/remediate"})
 
 	require.Error(t, err)
 }

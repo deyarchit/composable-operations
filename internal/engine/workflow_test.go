@@ -13,9 +13,9 @@ import (
 
 	"composable-operations/internal/core"
 	"composable-operations/internal/engine"
-	"composable-operations/internal/llm"
 	"composable-operations/internal/ops"
 	"composable-operations/internal/registry"
+	"composable-operations/internal/testutil"
 )
 
 // WorkflowSuite covers the key behaviors of RunFlow as specified in the design.
@@ -30,7 +30,7 @@ type WorkflowSuite struct {
 func (s *WorkflowSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
 	s.reg = registry.New()
-	s.Require().NoError(ops.RegisterBuiltins(s.reg, &llm.StubClient{}))
+	s.Require().NoError(ops.RegisterBuiltins(s.reg, &testutil.StubChatModel{}))
 	s.workflows = &engine.Workflows{Registry: s.reg}
 	s.env.RegisterWorkflowWithOptions(s.workflows.RunFlow, workflow.RegisterOptions{Name: "RunFlow"})
 	acts := &engine.Activities{Registry: s.reg}
@@ -69,10 +69,9 @@ func (s *WorkflowSuite) TestRunFlow_ExecutesStepsInOrderAndThreadsEnvelope() {
 		return engine.ActivityOutput{Envelope: out}, nil
 	})
 
-	def := twoStepActivityDef()
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
-		Definition: def,
-		Input:      core.Envelope{"trigger": true},
+		Definition: twoStepActivityDef(),
+		Input:      core.Envelope{"trigger": "alert"},
 	})
 
 	s.Require().True(s.env.IsWorkflowCompleted())
@@ -90,7 +89,7 @@ func (s *WorkflowSuite) TestRunFlow_HumanApproval_ApprovesContinues() {
 	s.env.OnActivity(engine.ExecuteOperationName, mock.Anything, mock.Anything).
 		Return(func(_ context.Context, in engine.ActivityInput) (engine.ActivityOutput, error) {
 			out := copyEnv(in.Envelope)
-			out["published"] = true
+			out["remediated"] = true
 			return engine.ActivityOutput{Envelope: out}, nil
 		})
 
@@ -98,15 +97,14 @@ func (s *WorkflowSuite) TestRunFlow_HumanApproval_ApprovesContinues() {
 		s.env.SignalWorkflow(engine.SignalApproval, core.ApprovalDecision{
 			StepID:   "human-review",
 			Approved: true,
-			Comment:  "Looks good",
+			Comment:  "Approved",
 			By:       "human",
 		})
 	}, 0)
 
-	def := humanGateDef()
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
-		Definition: def,
-		Input:      core.Envelope{"content": "test"},
+		Definition: humanGateDef(),
+		Input:      core.Envelope{"service": "payment-api"},
 	})
 
 	s.Require().True(s.env.IsWorkflowCompleted())
@@ -121,10 +119,10 @@ func (s *WorkflowSuite) TestRunFlow_HumanApproval_ApprovesContinues() {
 
 // kb5: on reject, run fails and does not execute downstream steps.
 func (s *WorkflowSuite) TestRunFlow_HumanApproval_RejectStopsRun() {
-	publishCalled := false
+	remediateCalled := false
 	s.env.OnActivity(engine.ExecuteOperationName, mock.Anything, mock.MatchedBy(func(in engine.ActivityInput) bool {
-		if in.Step.ID == "publish-content" {
-			publishCalled = true
+		if in.Step.ID == "remediate" {
+			remediateCalled = true
 		}
 		return true
 	})).Return(engine.ActivityOutput{Envelope: core.Envelope{}}, nil).Maybe()
@@ -133,27 +131,30 @@ func (s *WorkflowSuite) TestRunFlow_HumanApproval_RejectStopsRun() {
 		s.env.SignalWorkflow(engine.SignalApproval, core.ApprovalDecision{
 			StepID:   "human-review",
 			Approved: false,
-			Comment:  "Not suitable",
+			Comment:  "Not warranted",
 			By:       "human",
 		})
 	}, 0)
 
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
 		Definition: humanGateDef(),
-		Input:      core.Envelope{"content": "bad content"},
+		Input:      core.Envelope{"service": "payment-api"},
 	})
 
 	s.True(s.env.IsWorkflowCompleted())
 	s.Error(s.env.GetWorkflowError())
-	s.False(publishCalled, "publish must not be called when rejected")
+	s.False(remediateCalled, "remediate must not be called when rejected")
 }
 
 // kb14: signal with wrong step_id is ignored.
 func (s *WorkflowSuite) TestRunFlow_HumanApproval_IgnoresWrongStepID() {
 	s.env.OnActivity(engine.ExecuteOperationName, mock.Anything, mock.Anything).
-		Return(engine.ActivityOutput{Envelope: core.Envelope{"published": true}}, nil)
+		Return(func(_ context.Context, in engine.ActivityInput) (engine.ActivityOutput, error) {
+			out := copyEnv(in.Envelope)
+			out["remediated"] = true
+			return engine.ActivityOutput{Envelope: out}, nil
+		})
 
-	// First signal has wrong step_id and should be ignored; second is correct.
 	callCount := 0
 	s.env.RegisterDelayedCallback(func() {
 		callCount++
@@ -173,7 +174,7 @@ func (s *WorkflowSuite) TestRunFlow_HumanApproval_IgnoresWrongStepID() {
 
 	s.env.ExecuteWorkflow(s.workflows.RunFlow, engine.FlowInput{
 		Definition: humanGateDef(),
-		Input:      core.Envelope{"content": "test"},
+		Input:      core.Envelope{"service": "payment-api"},
 	})
 
 	s.Require().True(s.env.IsWorkflowCompleted())
@@ -183,13 +184,13 @@ func (s *WorkflowSuite) TestRunFlow_HumanApproval_IgnoresWrongStepID() {
 // kb9: run uses definition from its input, not from disk (immutable mid-run).
 func (s *WorkflowSuite) TestRunFlow_UsesDefinitionFromInput() {
 	s.env.OnActivity(engine.ExecuteOperationName, mock.Anything, mock.MatchedBy(func(in engine.ActivityInput) bool {
-		return in.Step.Type == "pii.scan"
-	})).Return(engine.ActivityOutput{Envelope: core.Envelope{"pii_found": false}}, nil)
+		return in.Step.Type == "metrics.check"
+	})).Return(engine.ActivityOutput{Envelope: core.Envelope{"service": "api", "cpu": 0.5}}, nil)
 
 	frozenDef := core.FlowDefinition{
 		Name: "frozen",
 		Steps: []core.StepConfig{
-			{ID: "scan", Type: "pii.scan", Params: map[string]any{"patterns": []any{`\d+`}}},
+			{ID: "check", Type: "metrics.check", Params: map[string]any{"fixture": map[string]any{"service": "api"}}},
 		},
 	}
 
@@ -208,27 +209,25 @@ func twoStepActivityDef() core.FlowDefinition {
 	return core.FlowDefinition{
 		Name: "two-step",
 		Steps: []core.StepConfig{
-			{ID: "step-a", Type: "pii.scan", Params: map[string]any{"patterns": []any{`\d+`}}},
-			{ID: "step-b", Type: "pii.scan", Params: map[string]any{"patterns": []any{`\d+`}}},
+			{ID: "step-a", Type: "metrics.check", Params: map[string]any{"fixture": map[string]any{"cpu": 0.9}}},
+			{ID: "step-b", Type: "logs.check", Params: map[string]any{"fixture": []any{"log line"}}},
 		},
 	}
 }
 
 func humanGateDef() core.FlowDefinition {
 	return core.FlowDefinition{
-		Name: "moderation",
+		Name: "incident-response",
 		Steps: []core.StepConfig{
 			{
-				ID:   "human-review",
-				Type: "human.approval",
-				Params: map[string]any{
-					"prompt": "Review this content",
-				},
+				ID:     "human-review",
+				Type:   "human.approval",
+				Params: map[string]any{"prompt": "Review incident"},
 			},
 			{
-				ID:     "publish-content",
-				Type:   "publish",
-				Params: map[string]any{},
+				ID:     "remediate",
+				Type:   "remediate",
+				Params: map[string]any{"endpoint": "https://ops.internal/remediate"},
 			},
 		},
 	}

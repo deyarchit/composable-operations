@@ -135,13 +135,14 @@ func awaitMatchingApproval(ctx workflow.Context, stepID string) core.ApprovalDec
 }
 
 func activityOptions(step core.StepConfig) workflow.ActivityOptions {
+	// Default to 3 attempts so non-transient errors (parse failures, bad config)
+	// eventually fail the run rather than retrying forever.
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 60 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	}
 	if rp := step.RetryPolicy; rp != nil {
-		ao.RetryPolicy = &temporal.RetryPolicy{
-			MaximumAttempts: int32(rp.MaxAttempts), //nolint:gosec // MaxAttempts is a small positive int from config
-		}
+		ao.RetryPolicy.MaximumAttempts = int32(rp.MaxAttempts) //nolint:gosec // MaxAttempts is a small positive int from config
 		if rp.InitialIntervalSeconds > 0 {
 			ao.RetryPolicy.InitialInterval = time.Duration(rp.InitialIntervalSeconds * float64(time.Second))
 		}
@@ -170,6 +171,14 @@ func buildRunStatus(runID, flow string, steps []core.StepResult, envelope core.E
 	}
 	if state == core.RunCompleted {
 		status.Result = copyMap(envelope)
+	}
+	if state == core.RunFailed {
+		for _, s := range steps {
+			if s.Status == core.StepFailed && s.Error != "" {
+				status.Error = s.Error
+				break
+			}
+		}
 	}
 	return status
 }

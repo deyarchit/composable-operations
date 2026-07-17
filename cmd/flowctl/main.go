@@ -36,6 +36,7 @@ func main() {
 
 	inputPath := *inputFile
 	if inputPath == "" {
+		// Convention: flows/<name>.sample.json holds a canned trigger payload.
 		inputPath = fmt.Sprintf("flows/%s.sample.json", *flowName)
 	}
 

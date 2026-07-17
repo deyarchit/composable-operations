@@ -9,16 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"composable-operations/internal/core"
-	"composable-operations/internal/llm"
 	"composable-operations/internal/loader"
 	"composable-operations/internal/ops"
 	"composable-operations/internal/registry"
+	"composable-operations/internal/testutil"
 )
 
 func newTestLoader(t *testing.T, dir string) *loader.Loader {
 	t.Helper()
 	reg := registry.New()
-	require.NoError(t, ops.RegisterBuiltins(reg, &llm.StubClient{}))
+	require.NoError(t, ops.RegisterBuiltins(reg, &testutil.StubChatModel{}))
 	return loader.New(dir, reg)
 }
 
@@ -32,16 +32,17 @@ func TestLoader_LoadsValidDefinition(t *testing.T) {
 	writeYAML(t, dir, "simple", `
 name: simple
 steps:
-  - id: scan
-    type: pii.scan
+  - id: check-metrics
+    type: metrics.check
     params:
-      patterns:
-        - '\d+'
-  - id: do-score
-    type: score
+      fixture:
+        service: api
+        cpu_usage: 0.9
+  - id: check-logs
+    type: logs.check
     params:
-      weights:
-        pii_found: 1.0
+      fixture:
+        - "ERROR: timeout"
 `)
 	l := newTestLoader(t, dir)
 
@@ -50,8 +51,8 @@ steps:
 	require.NoError(t, err)
 	assert.Equal(t, "simple", def.Name)
 	assert.Len(t, def.Steps, 2)
-	assert.Equal(t, "scan", def.Steps[0].ID)
-	assert.Equal(t, "pii.scan", def.Steps[0].Type)
+	assert.Equal(t, "check-metrics", def.Steps[0].ID)
+	assert.Equal(t, "metrics.check", def.Steps[0].Type)
 }
 
 func TestLoader_RejectsUnknownOpType(t *testing.T) {
@@ -77,11 +78,13 @@ func TestLoader_RejectsDuplicateStepIDs(t *testing.T) {
 name: dupes
 steps:
   - id: same-id
-    type: publish
-    params: {}
+    type: remediate
+    params:
+      endpoint: "http://ops.internal"
   - id: same-id
-    type: publish
-    params: {}
+    type: remediate
+    params:
+      endpoint: "http://ops.internal"
 `)
 	l := newTestLoader(t, dir)
 
@@ -96,10 +99,9 @@ func TestLoader_RejectsInvalidParams(t *testing.T) {
 	writeYAML(t, dir, "bad-params", `
 name: bad-params
 steps:
-  - id: classify
-    type: llm.classify
-    params:
-      output_field: score
+  - id: analyze
+    type: llm.analyze
+    params: {}
 `)
 	l := newTestLoader(t, dir)
 
@@ -130,16 +132,25 @@ func TestLoader_RejectsMissingFile(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoader_ModerationV1LoadsAndHasHumanApproval(t *testing.T) {
+func TestLoader_RejectsPathTraversal(t *testing.T) {
+	l := newTestLoader(t, t.TempDir())
+
+	_, err := l.Load("../etc/passwd")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid flow name")
+}
+
+func TestLoader_IncidentResponseV1LoadsAndHasHumanApproval(t *testing.T) {
 	l := newTestLoader(t, filepath.Join("..", "..", "flows"))
-	def, err := l.Load("moderation-v1")
+	def, err := l.Load("incident-response-v1")
 	require.NoError(t, err)
 	assert.True(t, hasStepType(def, "human.approval"), "v1 must have a human.approval step")
 }
 
-func TestLoader_ModerationV2LoadsAndHasLLMDecision(t *testing.T) {
+func TestLoader_IncidentResponseV2LoadsAndHasLLMDecision(t *testing.T) {
 	l := newTestLoader(t, filepath.Join("..", "..", "flows"))
-	def, err := l.Load("moderation-v2")
+	def, err := l.Load("incident-response-v2")
 	require.NoError(t, err)
 	assert.True(t, hasStepType(def, "llm.decision"), "v2 must have an llm.decision step")
 }

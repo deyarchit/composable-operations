@@ -20,10 +20,10 @@ import (
 
 	"composable-operations/internal/api"
 	"composable-operations/internal/core"
-	"composable-operations/internal/llm"
 	"composable-operations/internal/loader"
 	"composable-operations/internal/ops"
 	"composable-operations/internal/registry"
+	"composable-operations/internal/testutil"
 )
 
 // apiClient is a typed HTTP client for the API under test.
@@ -68,11 +68,11 @@ type mockTemporalClient struct {
 	capturedSig *core.ApprovalDecision
 }
 
-func (m *mockTemporalClient) ExecuteWorkflow(_ context.Context, _ client.StartWorkflowOptions, _ interface{}, _ ...interface{}) (client.WorkflowRun, error) {
+func (m *mockTemporalClient) ExecuteWorkflow(_ context.Context, _ client.StartWorkflowOptions, _ any, _ ...any) (client.WorkflowRun, error) {
 	return nil, m.startErr
 }
 
-func (m *mockTemporalClient) QueryWorkflow(_ context.Context, _ string, _ string, _ string, _ ...interface{}) (converter.EncodedValue, error) {
+func (m *mockTemporalClient) QueryWorkflow(_ context.Context, _ string, _ string, _ string, _ ...any) (converter.EncodedValue, error) {
 	if m.queryErr != nil {
 		return nil, m.queryErr
 	}
@@ -82,7 +82,7 @@ func (m *mockTemporalClient) QueryWorkflow(_ context.Context, _ string, _ string
 	return &encodedStatus{status: m.queryStatus}, nil
 }
 
-func (m *mockTemporalClient) SignalWorkflow(_ context.Context, _ string, _ string, _ string, arg interface{}) error {
+func (m *mockTemporalClient) SignalWorkflow(_ context.Context, _ string, _ string, _ string, arg any) error {
 	if d, ok := arg.(core.ApprovalDecision); ok {
 		m.capturedSig = &d
 	}
@@ -98,7 +98,7 @@ type encodedStatus struct {
 	status *core.RunStatus
 }
 
-func (e *encodedStatus) Get(valuePtr interface{}) error {
+func (e *encodedStatus) Get(valuePtr any) error {
 	out, ok := valuePtr.(*core.RunStatus)
 	if !ok {
 		return errors.New("expected *core.RunStatus")
@@ -114,7 +114,7 @@ func (e *encodedStatus) HasValue() bool { return e.status != nil }
 func newTestServer(t *testing.T, temporal *mockTemporalClient, flowsDir string) *httptest.Server {
 	t.Helper()
 	reg := registry.New()
-	require.NoError(t, ops.RegisterBuiltins(reg, &llm.StubClient{}))
+	require.NoError(t, ops.RegisterBuiltins(reg, &testutil.StubChatModel{}))
 	ldr := loader.New(flowsDir, reg)
 	h := api.NewHandler(temporal, ldr)
 	e := echo.New()
@@ -131,11 +131,12 @@ func newFlowsDir(t *testing.T) string {
 	yaml := `
 name: test-flow
 steps:
-  - id: scan
-    type: pii.scan
+  - id: check-metrics
+    type: metrics.check
     params:
-      patterns:
-        - '\d+'
+      fixture:
+        service: api
+        cpu: 0.5
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "test-flow.yaml"), []byte(yaml), 0o600))
 	return dir
@@ -163,7 +164,7 @@ func TestStartRun_ValidFlow(t *testing.T) {
 
 	t.Run("When starting a run for a known flow", func(t *testing.T) {
 		resp := c.do(t, http.MethodPost, "/flows/test-flow/runs", map[string]any{
-			"input": map[string]any{"content": "hello"},
+			"input": map[string]any{"trigger": "alert"},
 		})
 
 		t.Run("Then it returns 201 with a run_id", func(t *testing.T) {
@@ -179,7 +180,7 @@ func TestGetRun_ReturnsStatus(t *testing.T) {
 		RunID: "run-123",
 		Flow:  "test-flow",
 		State: core.RunCompleted,
-		Steps: []core.StepResult{{StepID: "scan", Status: core.StepCompleted}},
+		Steps: []core.StepResult{{StepID: "check-metrics", Status: core.StepCompleted}},
 	}
 	srv := newTestServer(t, &mockTemporalClient{queryStatus: status}, newFlowsDir(t))
 	c := newAPIClient(srv)

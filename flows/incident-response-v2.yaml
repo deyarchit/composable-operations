@@ -1,0 +1,55 @@
+name: incident-response
+steps:
+  - id: check-metrics
+    type: metrics.check
+    params:
+      fixture:
+        service: payment-api
+        cpu_usage: 0.92
+        error_rate: 0.15
+        p99_latency_ms: 2400
+
+  - id: check-logs
+    type: logs.check
+    params:
+      fixture:
+        - "ERROR payment-api: timeout connecting to postgres after 30s"
+        - "ERROR payment-api: timeout connecting to postgres after 30s"
+        - "WARN  payment-api: circuit breaker open for downstream db"
+        - "ERROR payment-api: 5xx rate exceeds threshold (15%)"
+
+  - id: analyze-incident
+    type: llm.analyze
+    params:
+      prompt_template: |
+        Analyze the following service incident and identify the root cause.
+
+        Service: {{.service}}
+        CPU Usage: {{.cpu_usage}}
+        Error Rate: {{.error_rate}}
+        P99 Latency: {{.p99_latency_ms}}ms
+
+        Recent logs:
+        {{range .logs}}- {{.}}
+        {{end}}
+        Respond with JSON only — no explanation, no markdown:
+        {"root_cause": string, "severity": "critical"|"high"|"medium"|"low", "recommended_action": string}
+
+  - id: llm-review
+    type: llm.decision
+    params:
+      prompt_template: |
+        An automated incident analysis has been completed for service {{.service}}.
+
+        Root cause: {{index .analysis "root_cause"}}
+        Severity: {{index .analysis "severity"}}
+        Recommended action: {{index .analysis "recommended_action"}}
+
+        Should we automatically apply the recommended remediation?
+        Respond with JSON only — no explanation, no markdown:
+        {"approved": bool, "comment": string}
+
+  - id: remediate
+    type: remediate
+    params:
+      endpoint: "https://ops.internal/remediate"

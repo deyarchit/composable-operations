@@ -28,8 +28,11 @@ func New(dir string, reg *registry.Registry) *Loader {
 // Validation fails fast: unknown types and duplicate step IDs are caught
 // before any run starts, so a bad definition can never enter Temporal history.
 func (l *Loader) Load(name string) (*core.FlowDefinition, error) {
+	if !isValidName(name) {
+		return nil, fmt.Errorf("loader: invalid flow name %q: only letters, digits, hyphens, and underscores are allowed", name)
+	}
 	path := filepath.Join(l.dir, name+".yaml")
-	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from a controlled name, not user input
+	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from a validated name (isValidName blocks traversal chars)
 	if err != nil {
 		return nil, fmt.Errorf("loader: read %s: %w", path, err)
 	}
@@ -44,6 +47,20 @@ func (l *Loader) Load(name string) (*core.FlowDefinition, error) {
 	}
 
 	return &def, nil
+}
+
+// isValidName accepts only letters, digits, hyphens, and underscores to prevent
+// path traversal via the flow name parameter that comes from the HTTP URL.
+func isValidName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *Loader) validate(def *core.FlowDefinition) error {
