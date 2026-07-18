@@ -1,11 +1,11 @@
 # Composable Operations
 
-A workflow engine where the **workflow lives in configuration, not code**. A business process is written as a chain of operations in an external definition; a single generic engine interprets and runs it. Reshaping the flow is a config edit, not a code change or redeploy.
+A workflow engine where the **workflow lives in configuration, not code**. A business process is composed as a chain of operations in an external definition, freely mixing deterministic steps with non-deterministic decisions made by an LLM or a human, and a single generic engine interprets and runs it. Reshaping the flow, including whether a given decision is automated or gated by a person, is a config edit, not a code change or redeploy.
 
 ## Principles
 
 1. **Externally-defined workflows drive the code.** The engine has no hard-coded pipeline. It reads a flow definition and executes whatever steps it declares, in order. Add, remove, reorder, or reconfigure steps by editing the definition alone: no code change, no redeploy. (The definition is YAML on disk here; it could equally be a database row or a config service.)
-2. **Autonomy is a per-step choice, flipped in one edit.** The same pipeline can gate a decision behind a human approval or hand that decision to an LLM. Switching between the two is a single-step definition change, with no code touched and no downstream step affected.
+2. **Non-deterministic decisions can be human or LLM, by configuration.** A step that needs judgment rather than deterministic logic can be gated behind a human approval or delegated to an LLM. The two are interchangeable, so moving a decision between human-in-the-loop and fully autonomous is a single-step configuration change, with no code touched and no downstream step affected.
 3. **The platform provides capability, not policy.** The engine owns the *mechanism*: a library of operations (deterministic steps, LLM steps, human gates) and a durable runtime to sequence them. It does not own the *intent*. Which steps run, in what order, and how much of the process is automated versus kept under human control is entirely the client's to define. The platform hands over a toolbox and a runtime; the client decides what workflow to build and how autonomous it should be.
 
 Everything below shows *how* these principles hold.
@@ -55,9 +55,9 @@ Composition is data. Capability is code. The demo never needs new capability, so
 
 ---
 
-## Principle 2: Autonomy is a per-step choice, flipped in one edit
+## Principle 2: Non-deterministic decisions can be human or LLM, by configuration
 
-Two flows ship with the demo. They are the **same five-step pipeline**. Only the fourth step differs: v1 pauses for a human to approve remediation; v2 lets an LLM make that call. Because a `human.approval` step and an `llm.decision` step emit the **same decision output** (`{approved, comment, by}`), the downstream `remediate` step can't tell them apart.
+The decision at step four is non-deterministic: whether to remediate takes judgment, not fixed logic. That judgment can come from a person or an LLM, and which one is purely a configuration detail. Two flows ship with the demo to show it. They are the **same five-step pipeline**; only the fourth step differs: v1 pauses for a human to approve remediation; v2 lets an LLM make that call. Because a `human.approval` step and an `llm.decision` step emit the **same decision output** (`{approved, comment, by}`), the downstream `remediate` step can't tell them apart.
 
 ```mermaid
 flowchart TB
