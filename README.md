@@ -2,8 +2,6 @@
 
 A workflow engine where the **workflow lives in configuration, not code**. A business process is written as a chain of operations in an external definition; a single generic engine interprets and runs it. Reshaping the flow is a config edit, not a code change or redeploy.
 
-> Setup, environment variables, providers, and how to extend the engine live in **[docs/configuration.md](docs/configuration.md)**. This README stays focused on what the project demonstrates.
-
 ## Principles
 
 1. **Externally-defined workflows drive the code.** The engine has no hard-coded pipeline. It reads a flow definition and executes whatever steps it declares, in order. Add, remove, reorder, or reconfigure steps by editing the definition alone: no code change, no redeploy. (The definition is YAML on disk here; it could equally be a database row or a config service.)
@@ -18,7 +16,7 @@ Everything below shows *how* these principles hold.
 
 There is one compiled workflow (`RunFlow`) that acts as an **interpreter**. It doesn't know what "incident response" is. It knows how to walk a list of steps, and for each step, look up an operation by its `type` name in a registry and run it. The definition is the program; `RunFlow` is the machine that runs it.
 
-> **The YAML file is incidental.** This demo keeps flow definitions in YAML on disk purely because it's the simplest thing to read and edit. The definition could just as well live in a database, a config service, an admin UI, or any other external store. The engine only needs a list of steps handed to it at run start. What matters is the principle: **the steps of the workflow, and what each step does, live outside the compiled code.** That's what makes a flow editable without touching or redeploying the engine. Swapping YAML-on-disk for a database is a change to one component (the Loader), not to the engine, the ops, or the workflow model.
+> **The YAML file is incidental.** Keeping definitions in YAML on disk is just the simplest choice for a demo; they could equally live in a database or config service. What matters is the principle: **the steps of the workflow, and what each step does, live outside the compiled code.** (Storage is one of several conscious scope choices; see [Deliberately out of scope](#deliberately-out-of-scope).)
 
 ```mermaid
 flowchart LR
@@ -232,3 +230,13 @@ go run ./cmd/flowctl run --flow incident-response-v2
 ```
 
 Full prerequisites, provider setup, environment variables, and how to add a new operation: **[docs/configuration.md](docs/configuration.md)**.
+
+---
+
+## Deliberately out of scope
+
+These are conscious choices for this demo, not limitations of the approach. Each is contained so it can be added later without reworking the engine.
+
+- **DAG / parallel branches + fan-in.** This demo runs a linear chain. Turning it into a DAG means the ordered list becomes an adjacency list, and `RunFlow` grows from a `for` loop into a readiness-based scheduler (`workflow.Go` + futures) with a named-inputs map. Chain-walking stays concentrated in `RunFlow` so this remains a contained change. Revisit when a flow genuinely needs concurrent branches.
+- **DB-backed / API-authored flow definitions.** Definitions are YAML files on disk, read in exactly one place (the Loader). Revisit when flows must be created or versioned at runtime via the API; keeping all definition-loading in the Loader means the swap stays local.
+- **Richer approval semantics.** Approve/reject plus a comment only. Approve-with-edit (the human mutates the payload) and approval-routes-to-branch are excluded (the latter needs a DAG anyway).
